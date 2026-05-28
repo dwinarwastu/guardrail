@@ -1,5 +1,7 @@
 # Guardrail
 
+![CI](https://github.com/dwinarwastu/guardrail/actions/workflows/ci.yml/badge.svg)
+
 > Production-grade rate limiter as a service — built to show real-world backend architecture.
 
 Built with **NestJS**, **Redis**, and **PostgreSQL**. Exposes a simple API that any internal service can call to enforce rate limiting using a sliding window algorithm.
