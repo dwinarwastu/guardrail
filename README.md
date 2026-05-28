@@ -1,98 +1,208 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Guardrail
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+> Production-grade rate limiter as a service — built to show real-world backend architecture.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Built with **NestJS**, **Redis**, and **PostgreSQL**. Exposes a simple API that any internal service can call to enforce rate limiting using a sliding window algorithm.
 
-## Description
+---
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Tech Stack
 
-## Project setup
+| Layer | Technology |
+|---|---|
+| Framework | NestJS |
+| Rate Limit Storage | Redis (ioredis) |
+| Database | PostgreSQL + TypeORM |
+| Algorithm | Sliding Window Counter |
+| Containerization | Docker + Docker Compose |
 
-```bash
-$ npm install
+---
+
+## How It Works
+
+1. **Create a rule** — define a rate limit rule for a resource (e.g. `/api/login`) with a limit and window size
+2. **Check** — internal service calls `POST /check` with the resource, identifier type, and identifier value
+3. **Evaluate** — guardrail looks up the active rule, runs the sliding window algorithm against Redis, and returns the decision
+4. **Response** — returns `allowed: true/false` with remaining count, reset time, and retry-after if blocked
+
+Each identifier (IP, user ID, API key) is tracked independently per resource.
+
+---
+
+## Sliding Window Algorithm
+
+Requests are tracked in a Redis Sorted Set where the score is the request timestamp. On each check:
+
+1. Remove all entries outside the current window
+2. Count remaining entries
+3. If count is below the limit — allow and add the new entry
+4. If count is at or above the limit — deny and return retry-after
+
+This avoids the burst problem of fixed window counters while being more memory-efficient than sliding window log.
+
+---
+
+## Project Structure
+
+```
+src/
+├── check/            # HTTP entry point, evaluate rate limit
+├── rule/             # CRUD rule management
+├── limiter/          # Core sliding window logic
+├── redis/            # Redis client provider
+└── common/
+    ├── entities/
+    ├── enums/
+    └── interfaces/
 ```
 
-## Compile and run the project
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 22+
+- Docker & Docker Compose
+
+### Run with Docker
 
 ```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+cp .env.example .env
+# fill in your credentials
+docker compose up -d
 ```
 
-## Run tests
+### Run locally
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm install
+npm run start:dev
 ```
 
-## Deployment
+---
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Environment Variables
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+| Variable | Description |
+|---|---|
+| `NODE_ENV` | `development` or `production` |
+| `DB_HOST` | PostgreSQL host |
+| `DB_PORT` | PostgreSQL port (default: `5432`) |
+| `DB_USER` | PostgreSQL user |
+| `DB_PASS` | PostgreSQL password |
+| `DB_NAME` | PostgreSQL database name |
+| `REDIS_HOST` | Redis host |
+| `REDIS_PORT` | Redis port (default: `6379`) |
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+---
+
+## API Reference
+
+### Check rate limit
+
+```
+POST /check
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+```json
+{
+  "resource": "/api/login",
+  "identifierType": "ip",
+  "identifier": "192.168.1.1"
+}
+```
 
-## Resources
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `resource` | `string` | Yes | Resource identifier, e.g. endpoint or service name |
+| `identifierType` | `ip \| user_id \| api_key` | Yes | Type of the identifier |
+| `identifier` | `string` | Yes | Actual identifier value |
 
-Check out a few resources that may come in handy when working with NestJS:
+**Response — allowed**
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```json
+{
+  "allowed": true,
+  "limit": 5,
+  "remaining": 4,
+  "resetAt": "2026-05-28T06:53:37.330Z"
+}
+```
 
-## Support
+**Response — blocked**
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+```json
+{
+  "allowed": false,
+  "limit": 5,
+  "remaining": 0,
+  "resetAt": "2026-05-28T06:53:37.330Z",
+  "retryAfter": 60
+}
+```
 
-## Stay in touch
+---
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+### Create a rule
 
-## License
+```
+POST /rule
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+```json
+{
+  "resource": "/api/login",
+  "identifierType": "ip",
+  "limit": 5,
+  "windowSizeSeconds": 60
+}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `resource` | `string` | Yes | Resource to apply the rule to |
+| `identifierType` | `ip \| user_id \| api_key` | Yes | Identifier type |
+| `limit` | `number` | Yes | Max requests allowed in the window |
+| `windowSizeSeconds` | `number` | Yes | Window size in seconds |
+| `status` | `active \| inactive` | No | Default: `active` |
+
+---
+
+### List all rules
+
+```
+GET /rule
+```
+
+---
+
+### Toggle rule status
+
+```
+PATCH /rule/:id/toggle
+```
+
+---
+
+### Remove a rule
+
+```
+DELETE /rule/:id
+```
+
+---
+
+## Identifier Types
+
+| Type | Description | Example |
+|---|---|---|
+| `ip` | Client IP address | `192.168.1.1` |
+| `user_id` | Authenticated user ID | `user-123` |
+| `api_key` | API key | `sk_live_abc123` |
+
+---
+
+## Architecture Decisions
+
+See [docs/adr](./docs/adr) for architecture decision records explaining the key design choices behind this service.
