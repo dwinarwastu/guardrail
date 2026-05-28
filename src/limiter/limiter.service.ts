@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import Redis from 'ioredis';
-import { REDIS_CLIENT } from './limiter.module';
+import { REDIS_CLIENT } from 'src/redis/redis.module';
 import { CheckResult } from 'src/common/interfaces/check-result.interface';
 import { Rule } from 'src/common/entities/rule.entity';
 
